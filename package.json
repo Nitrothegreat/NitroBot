@@ -1,10 +1,19 @@
 {
   "name": "nitrobot",
   "version": "1.0.0",
-  "description": "Nitro's Discord Bot",
-  "main": "index.js",
+  "description": "An extensible Discord bot built with discord.js",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22.21.0"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "deploy": "node --env-file-if-exists=.env scripts/deploy-commands.js",
+    "test": "node --test",
+    "test:watch": "node --test --watch",
+    "lint": "eslint .",
+    "check": "npm run lint && npm test"
   },
   "author": "James Wygocki (Nitrothegreat)",
   "license": "ISC",
@@ -12,6 +21,8 @@
     "discord.js": "^14.6.0"
   },
   "devDependencies": {
-    "eslint": "^8.27.0"
+    "@eslint/js": "^9.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^16.0.0"
   }
 }

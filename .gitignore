@@ -130,3 +130,6 @@ dist
 .pnp.*
 config.json
 config2.json
+.env
+.env.*
+!.env.example

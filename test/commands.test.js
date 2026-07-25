@@ -10,6 +10,7 @@ import * as avatar from '../src/commands/avatar.js';
 import * as botinfo from '../src/commands/botinfo.js';
 import * as help from '../src/commands/help.js';
 import * as ping from '../src/commands/ping.js';
+import * as poll from '../src/commands/poll.js';
 import * as roll from '../src/commands/roll.js';
 import * as secretping from '../src/commands/secretping.js';
 import * as server from '../src/commands/server.js';
@@ -18,7 +19,7 @@ import * as user from '../src/commands/user.js';
 
 const require = createRequire(import.meta.url);
 const packageMetadata = /** @type {{ version: string }} */ (require('../package.json'));
-const commands = [avatar, botinfo, help, ping, roll, secretping, server, sourcecode, user];
+const commands = [avatar, botinfo, help, ping, poll, roll, secretping, server, sourcecode, user];
 
 describe('commands', () => {
 	it('exports unique, serializable definitions and handlers', () => {
@@ -29,6 +30,7 @@ describe('commands', () => {
 			'botinfo',
 			'help',
 			'ping',
+			'poll',
 			'roll',
 			'secretping',
 			'server',
@@ -211,6 +213,247 @@ describe('commands', () => {
 		assert.equal(definition.name, 'help');
 		assert.equal(definition.description, 'Lists the bot\'s available commands.');
 		assert.deepEqual(definition.options, []);
+	});
+
+	it('defines poll with the exact required and optional string limits', () => {
+		const definition = JSON.parse(JSON.stringify(poll.data.toJSON()));
+		assert.deepEqual(definition, {
+			description: 'Creates a 24-hour single-choice poll.',
+			name: 'poll',
+			options: [
+				{
+					description: 'The poll question.',
+					max_length: 300,
+					name: 'question',
+					required: true,
+					type: ApplicationCommandOptionType.String,
+				},
+				{
+					description: 'The first poll option.',
+					max_length: 55,
+					name: 'option1',
+					required: true,
+					type: ApplicationCommandOptionType.String,
+				},
+				{
+					description: 'The second poll option.',
+					max_length: 55,
+					name: 'option2',
+					required: true,
+					type: ApplicationCommandOptionType.String,
+				},
+				{
+					description: 'The third poll option.',
+					max_length: 55,
+					name: 'option3',
+					required: false,
+					type: ApplicationCommandOptionType.String,
+				},
+				{
+					description: 'The fourth poll option.',
+					max_length: 55,
+					name: 'option4',
+					required: false,
+					type: ApplicationCommandOptionType.String,
+				},
+				{
+					description: 'The fifth poll option.',
+					max_length: 55,
+					name: 'option5',
+					required: false,
+					type: ApplicationCommandOptionType.String,
+				},
+			],
+			type: 1,
+		});
+	});
+
+	it('creates exact public native polls with 2 through 5 answers', async () => {
+		for (let answerCount = 2; answerCount <= 5; answerCount += 1) {
+			const values = {
+				question: '  Which option?  ',
+				option1: '  First  ',
+				option2: 'Second',
+				option3: answerCount >= 3 ? 'Third' : null,
+				option4: answerCount >= 4 ? 'Fourth' : null,
+				option5: answerCount >= 5 ? 'Fifth  ' : null,
+			};
+			const getString = mock.fn((name) => values[/** @type {keyof typeof values} */ (name)]);
+			const reply = mock.fn();
+
+			await poll.execute({ options: { getString }, reply });
+
+			assert.deepEqual(
+				getString.mock.calls.map((call) => call.arguments),
+				[
+					['question', true],
+					['option1', true],
+					['option2', true],
+					['option3'],
+					['option4'],
+					['option5'],
+				],
+			);
+			assert.deepEqual(reply.mock.calls[0].arguments[0], {
+				poll: {
+					question: { text: 'Which option?' },
+					answers: [
+						{ text: 'First' },
+						{ text: 'Second' },
+						{ text: 'Third' },
+						{ text: 'Fourth' },
+						{ text: 'Fifth' },
+					].slice(0, answerCount),
+					duration: 24,
+					allowMultiselect: false,
+				},
+			});
+		}
+	});
+
+	it('includes optional poll answers in numeric order across gaps', async () => {
+		const values = {
+			question: 'Question',
+			option1: 'One',
+			option2: 'Two',
+			option3: null,
+			option4: 'Four',
+			option5: null,
+		};
+		const reply = mock.fn();
+
+		await poll.execute({
+			options: {
+				getString: (name) => values[/** @type {keyof typeof values} */ (name)],
+			},
+			reply,
+		});
+
+		assert.deepEqual(reply.mock.calls[0].arguments[0].poll.answers, [
+			{ text: 'One' },
+			{ text: 'Two' },
+			{ text: 'Four' },
+		]);
+	});
+
+	it('rejects duplicate poll answers privately without echoing them', async () => {
+		const duplicateSentinel = 'PRIVATE_DUPLICATE_SENTINEL';
+		const values = {
+			question: 'Question',
+			option1: ` ${duplicateSentinel} `,
+			option2: duplicateSentinel.toLowerCase(),
+			option3: null,
+			option4: null,
+			option5: null,
+		};
+		const reply = mock.fn();
+
+		await poll.execute({
+			options: {
+				getString: (name) => values[/** @type {keyof typeof values} */ (name)],
+			},
+			reply,
+		});
+
+		assert.deepEqual(reply.mock.calls[0].arguments[0], {
+			content: 'Poll options must be unique.',
+			flags: MessageFlags.Ephemeral,
+		});
+		assert.doesNotMatch(JSON.stringify(reply.mock.calls), new RegExp(duplicateSentinel));
+	});
+
+	it('keeps compatibility-distinct poll answers separate', async () => {
+		const values = {
+			question: 'Question',
+			option1: '①',
+			option2: '1',
+			option3: null,
+			option4: null,
+			option5: null,
+		};
+		const reply = mock.fn();
+
+		await poll.execute({
+			options: {
+				getString: (name) => values[/** @type {keyof typeof values} */ (name)],
+			},
+			reply,
+		});
+
+		assert.deepEqual(reply.mock.calls[0].arguments[0].poll.answers, [
+			{ text: '①' },
+			{ text: '1' },
+		]);
+	});
+
+	it('rejects blank or overlength poll text privately', async () => {
+		const invalidCases = [
+			{
+				expected: 'Poll questions must contain 1 to 300 characters.',
+				values: { question: '   ', option1: 'One', option2: 'Two' },
+			},
+			{
+				expected: 'Poll questions must contain 1 to 300 characters.',
+				values: { question: 'q'.repeat(301), option1: 'One', option2: 'Two' },
+			},
+			{
+				expected: 'Poll options must contain 1 to 55 characters.',
+				values: { question: 'Question', option1: 'One', option2: '   ' },
+			},
+			{
+				expected: 'Poll options must contain 1 to 55 characters.',
+				values: { question: 'Question', option1: 'One', option2: 'o'.repeat(56) },
+			},
+		];
+
+		for (const { expected, values } of invalidCases) {
+			const reply = mock.fn();
+			await poll.execute({
+				options: {
+					getString: (name) => values[/** @type {keyof typeof values} */ (name)] ?? null,
+				},
+				reply,
+			});
+			assert.deepEqual(reply.mock.calls[0].arguments[0], {
+				content: expected,
+				flags: MessageFlags.Ephemeral,
+			});
+		}
+	});
+
+	it('rejects malformed direct poll values privately', async () => {
+		const invalidCases = [
+			{
+				expected: 'Poll questions must contain 1 to 300 characters.',
+				values: { question: null, option1: 'One', option2: 'Two' },
+			},
+			{
+				expected: 'Poll options must contain 1 to 55 characters.',
+				values: { question: 'Question', option1: 'One', option2: null },
+			},
+			{
+				expected: 'Poll options must contain 1 to 55 characters.',
+				values: { question: 'Question', option1: 'One', option2: 'Two', option3: 3 },
+			},
+		];
+
+		for (const { expected, values } of invalidCases) {
+			const reply = mock.fn();
+			await poll.execute({
+				options: {
+					getString: (name) => /** @type {string | null} */ (
+						/** @type {unknown} */ (
+							values[/** @type {keyof typeof values} */ (name)] ?? null
+						)
+					),
+				},
+				reply,
+			});
+			assert.deepEqual(reply.mock.calls[0].arguments[0], {
+				content: expected,
+				flags: MessageFlags.Ephemeral,
+			});
+		}
 	});
 
 	it('defines roll with optional sides constrained from 2 through 1000', () => {

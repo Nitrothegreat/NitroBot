@@ -4,6 +4,8 @@
   "description": "Nitro's Discord Bot",
   "main": "index.js",
   "scripts": {
+    "lint": "eslint .",
+    "verify": "npm run lint",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "James Wygocki (Nitrothegreat)",

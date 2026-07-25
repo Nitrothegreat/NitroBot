@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
 import { describe, it, mock } from 'node:test';
-import { ApplicationCommandOptionType, MessageFlags } from 'discord.js';
+import {
+	ApplicationCommandOptionType,
+	MessageFlags,
+	version as discordJsVersion,
+} from 'discord.js';
 import * as avatar from '../src/commands/avatar.js';
+import * as botinfo from '../src/commands/botinfo.js';
 import * as help from '../src/commands/help.js';
 import * as ping from '../src/commands/ping.js';
 import * as roll from '../src/commands/roll.js';
@@ -10,7 +16,9 @@ import * as server from '../src/commands/server.js';
 import * as sourcecode from '../src/commands/sourcecode.js';
 import * as user from '../src/commands/user.js';
 
-const commands = [avatar, help, ping, roll, secretping, server, sourcecode, user];
+const require = createRequire(import.meta.url);
+const packageMetadata = /** @type {{ version: string }} */ (require('../package.json'));
+const commands = [avatar, botinfo, help, ping, roll, secretping, server, sourcecode, user];
 
 describe('commands', () => {
 	it('exports unique, serializable definitions and handlers', () => {
@@ -18,6 +26,7 @@ describe('commands', () => {
 
 		assert.deepEqual(names, [
 			'avatar',
+			'botinfo',
 			'help',
 			'ping',
 			'roll',
@@ -31,6 +40,81 @@ describe('commands', () => {
 			assert.equal(typeof command.data.toJSON, 'function');
 			assert.equal(typeof command.execute, 'function');
 		}
+	});
+
+	it('defines botinfo without options', () => {
+		const definition = botinfo.data.toJSON();
+		assert.equal(definition.name, 'botinfo');
+		assert.equal(definition.description, 'Displays information about NitroBot.');
+		assert.deepEqual(definition.options, []);
+	});
+
+	it('displays exactly the allowed bot information publicly', async () => {
+		const reply = mock.fn();
+
+		await botinfo.execute({
+			client: { uptime: 93_784_567, ws: { ping: 42.6 } },
+			reply,
+		});
+
+		const response = reply.mock.calls[0].arguments[0];
+		assert.equal('content' in response, false);
+		assert.equal('flags' in response, false);
+		assert.deepEqual(response.embeds[0].toJSON(), {
+			fields: [
+				{ name: 'NitroBot Version', value: packageMetadata.version },
+				{ name: 'Uptime', value: '1d 2h 3m 4s' },
+				{ name: 'WebSocket Latency', value: '43 ms' },
+				{ name: 'Node.js Version', value: process.version },
+				{ name: 'discord.js Version', value: discordJsVersion },
+			],
+			title: 'NitroBot Information',
+		});
+	});
+
+	it('formats duration boundaries', () => {
+		assert.equal(botinfo.formatDuration(0), '0s');
+		assert.equal(botinfo.formatDuration(999.9), '0s');
+		assert.equal(botinfo.formatDuration(60_000), '1m 0s');
+		assert.equal(botinfo.formatDuration(3_600_000), '1h 0m 0s');
+		assert.equal(botinfo.formatDuration(86_400_000), '1d 0h 0m 0s');
+		assert.equal(botinfo.formatDuration(93_784_999), '1d 2h 3m 4s');
+	});
+
+	it('reports invalid uptime and latency metrics independently as unavailable', () => {
+		const invalidMetrics = [
+			null,
+			undefined,
+			-1,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			Number.MAX_SAFE_INTEGER + 1,
+			'42',
+			new Number(42),
+			[],
+			{},
+		];
+
+		for (const invalid of invalidMetrics) {
+			const invalidNumber = /** @type {number} */ (invalid);
+			assert.equal(botinfo.formatDuration(invalidNumber), 'Unavailable');
+			assert.equal(botinfo.formatLatency(invalidNumber), 'Unavailable');
+		}
+
+		assert.deepEqual(botinfo.createBotInfoEmbed({
+			latency: -1,
+			uptime: 1000,
+		}).toJSON().fields?.slice(1, 3), [
+			{ name: 'Uptime', value: '1s' },
+			{ name: 'WebSocket Latency', value: 'Unavailable' },
+		]);
+		assert.deepEqual(botinfo.createBotInfoEmbed({
+			latency: 0,
+			uptime: /** @type {number} */ (/** @type {unknown} */ (undefined)),
+		}).toJSON().fields?.slice(1, 3), [
+			{ name: 'Uptime', value: 'Unavailable' },
+			{ name: 'WebSocket Latency', value: '0 ms' },
+		]);
 	});
 
 	it('defines avatar with an optional target user', () => {

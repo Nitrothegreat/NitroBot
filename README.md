@@ -57,6 +57,7 @@ Guild commands normally update immediately. This project intentionally does not 
 | Command | Description |
 | --- | --- |
 | `/avatar [target]` | Publicly displays your avatar, or another user's avatar when selected. |
+| `/botinfo` | Publicly displays NitroBot's version, uptime, latency, and runtime versions. |
 | `/help` | Privately lists the bot's available commands. |
 | `/ping` | Replies with `Pong!`. |
 | `/roll [sides: 2–1000]` | Publicly rolls a die with 6 sides by default. |

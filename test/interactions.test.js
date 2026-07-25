@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 import { MessageFlags } from 'discord.js';
 import { handleInteraction } from '../src/interactions.js';
+import * as poll from '../src/commands/poll.js';
 
 /**
  * @param {Record<string, unknown>} [overrides]
@@ -81,6 +82,62 @@ describe('handleInteraction', () => {
 		]);
 		const logged = JSON.stringify(interaction.client.logger.error.mock.calls);
 		assert.doesNotMatch(logged, new RegExp(privateMessage));
+		assert.doesNotMatch(logged, new RegExp(token));
+	});
+
+	it('does not log raw poll text when Discord rejects poll creation', async () => {
+		const question = 'PRIVATE_POLL_QUESTION_SENTINEL';
+		const answer = 'PRIVATE_POLL_ANSWER_SENTINEL';
+		const token = 'POLL_INTERACTION_TOKEN_SENTINEL';
+		const error = Object.assign(new Error('poll request failed'), {
+			code: 50_013,
+			requestBody: {
+				poll: {
+					answers: [{ poll_media: { text: answer } }],
+					question: { text: question },
+				},
+			},
+			status: 403,
+			url: `https://discord.com/interactions/123/${token}/callback`,
+		});
+		let replyCount = 0;
+		const reply = mock.fn(async (options) => {
+			void options;
+			replyCount += 1;
+			if (replyCount === 1) {
+				throw error;
+			}
+		});
+		const values = {
+			question,
+			option1: answer,
+			option2: 'Second answer',
+			option3: null,
+			option4: null,
+			option5: null,
+		};
+		const interaction = createInteraction({
+			commandName: 'poll',
+			options: {
+				getString: (name = '') => values[/** @type {keyof typeof values} */ (name)],
+			},
+			reply,
+		});
+		interaction.client.commands.set('poll', poll);
+
+		await handleInteraction(interaction);
+
+		assert.deepEqual(reply.mock.calls[1].arguments[0], {
+			content: 'Something went wrong while running that command.',
+			flags: MessageFlags.Ephemeral,
+		});
+		assert.deepEqual(interaction.client.logger.error.mock.calls[0].arguments, [
+			'Command failed: poll',
+			{ code: 50_013, status: 403, type: 'Error' },
+		]);
+		const logged = JSON.stringify(interaction.client.logger.error.mock.calls);
+		assert.doesNotMatch(logged, new RegExp(question));
+		assert.doesNotMatch(logged, new RegExp(answer));
 		assert.doesNotMatch(logged, new RegExp(token));
 	});
 

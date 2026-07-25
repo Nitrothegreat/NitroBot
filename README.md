@@ -60,6 +60,7 @@ Guild commands normally update immediately. This project intentionally does not 
 | `/botinfo` | Publicly displays NitroBot's version, uptime, latency, and runtime versions. |
 | `/help` | Privately lists the bot's available commands. |
 | `/ping` | Replies with `Pong!`. |
+| `/poll question option1 option2 [option3] [option4] [option5]` | Publicly creates a 24-hour single-choice poll. |
 | `/roll [sides: 2–1000]` | Publicly rolls a die with 6 sides by default. |
 | `/secretping` | Replies privately with `Pong!`. |
 | `/server` | Shows the current server's name and member count. |

@@ -31,9 +31,10 @@ Preserve Discord's single-initial-response contract:
   requests from them.
 - Do not log tokens, authorization headers, complete environment objects, or
   interaction payloads that may contain private content.
-- Reduce caught errors to allowlisted diagnostic fields before logging them;
-  Discord REST errors may contain callback URLs, webhook tokens, and request
-  bodies.
+- Give locally authored operational failures fixed reason codes and
+  reason-specific allowlisted context before logging them. Reduce all other
+  caught errors to allowlisted numeric diagnostic fields; Discord REST errors
+  may contain callback URLs, webhook tokens, and request bodies.
 - Use dependency injection at network and time boundaries so tests stay
   deterministic.
 - Catch failures at user-facing and event-dispatch boundaries; do not silently

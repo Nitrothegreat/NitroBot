@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { loadConfig } from '../src/config.js';
+import { safeErrorDetails } from '../src/errors.js';
 
 /** @type {NodeJS.ProcessEnv} */
 const validEnvironment = {
@@ -31,11 +32,15 @@ describe('loadConfig', () => {
 
 			assert.throws(
 				() => loadConfig(environment),
-				(error) => (
-					error instanceof Error
-					&& error.message.includes(name)
-					&& !error.message.includes('secret-token')
-				),
+				(error) => {
+					assert.deepEqual(safeErrorDetails(error), {
+						context: { variable: name },
+						reason: 'CONFIG_VARIABLE_MISSING',
+						type: 'OperationalError',
+					});
+					assert.doesNotMatch(JSON.stringify(safeErrorDetails(error)), /secret-token/);
+					return true;
+				},
 			);
 		});
 	}
@@ -43,7 +48,15 @@ describe('loadConfig', () => {
 	it('rejects malformed Discord IDs', () => {
 		assert.throws(
 			() => loadConfig({ ...validEnvironment, DISCORD_GUILD_ID: 'not-an-id' }),
-			/DISCORD_GUILD_ID must be a valid Discord ID/,
+			(error) => {
+				assert.deepEqual(safeErrorDetails(error), {
+					context: { variable: 'DISCORD_GUILD_ID' },
+					reason: 'CONFIG_DISCORD_ID_INVALID',
+					type: 'OperationalError',
+				});
+				assert.doesNotMatch(JSON.stringify(safeErrorDetails(error)), /not-an-id/);
+				return true;
+			},
 		);
 	});
 });

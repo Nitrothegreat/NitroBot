@@ -1,0 +1,248 @@
+name: Staging Smoke Session
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Open draft pull request number to test
+        required: true
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nitrobot-staging
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Resolve reviewed PR commit
+    runs-on: ubuntu-latest
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: read
+    outputs:
+      head_sha: ${{ steps.pr.outputs.head_sha }}
+      merge_sha: ${{ steps.pr.outputs.merge_sha }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+    steps:
+      - name: Require the trusted default-branch workflow
+        env:
+          WORKFLOW_REF: ${{ github.ref }}
+        run: |
+          if [ "$WORKFLOW_REF" != "refs/heads/main" ]; then
+            echo "Dispatch this workflow only from the main branch"
+            exit 1
+          fi
+      - name: Resolve open in-repository draft PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+          state="$(jq -r '.state' <<<"$pr_json")"
+          draft="$(jq -r '.draft' <<<"$pr_json")"
+          base_ref="$(jq -r '.base.ref' <<<"$pr_json")"
+          base_sha="$(jq -r '.base.sha' <<<"$pr_json")"
+          head_repository="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
+          head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
+          merge_sha="$(jq -r '.merge_commit_sha' <<<"$pr_json")"
+          changed_files="$(jq -r '.changed_files' <<<"$pr_json")"
+
+          if [ "$state" != "open" ] || [ "$draft" != "true" ]; then
+            echo "Staging requires an open draft pull request"
+            exit 1
+          fi
+          if [ "$base_ref" != "main" ]; then
+            echo "Staging requires a pull request targeting main"
+            exit 1
+          fi
+          if [ "$head_repository" != "$GITHUB_REPOSITORY" ]; then
+            echo "Staging does not execute code from forked repositories"
+            exit 1
+          fi
+          for sha in "$base_sha" "$head_sha" "$merge_sha"; do
+            if ! printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+              echo "Pull request metadata did not contain full commit SHAs"
+              exit 1
+            fi
+          done
+          if [ "$changed_files" -gt 3000 ]; then
+            echo "Staging cannot safely inspect pull requests with more than 3000 changed files"
+            exit 1
+          fi
+
+          workflow_changes="$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" \
+            --jq '.[] | select(.filename | startswith(".github/workflows/")) | .filename')"
+          if [ -n "$workflow_changes" ]; then
+            echo "Staging does not trust checks from a PR that changes workflows:"
+            printf '%s\n' "$workflow_changes"
+            echo "Merge workflow changes separately before staging application code."
+            exit 1
+          fi
+
+          current_pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+          if [ "$(jq -r '.state' <<<"$current_pr_json")" != "open" ] \
+            || [ "$(jq -r '.draft' <<<"$current_pr_json")" != "true" ] \
+            || [ "$(jq -r '.base.ref' <<<"$current_pr_json")" != "$base_ref" ] \
+            || [ "$(jq -r '.base.sha' <<<"$current_pr_json")" != "$base_sha" ] \
+            || [ "$(jq -r '.head.repo.full_name' <<<"$current_pr_json")" != "$GITHUB_REPOSITORY" ] \
+            || [ "$(jq -r '.head.sha' <<<"$current_pr_json")" != "$head_sha" ] \
+            || [ "$(jq -r '.merge_commit_sha' <<<"$current_pr_json")" != "$merge_sha" ]; then
+            echo "Pull request changed while its files were being inspected; retry staging"
+            exit 1
+          fi
+
+          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
+          echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+      - name: Require successful PR checks
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          MERGE_SHA: ${{ steps.pr.outputs.merge_sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          check_runs="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/commits/$MERGE_SHA/check-runs?per_page=100")"
+
+          {
+            echo "## Staging candidate"
+            echo
+            echo "- Pull request: #$PR_NUMBER"
+            echo "- Base commit: \`$BASE_SHA\`"
+            echo "- Head commit to execute: \`$HEAD_SHA\`"
+            echo "- Merge commit used for checks: \`$MERGE_SHA\`"
+            echo
+            echo "| Required check | Run ID | Conclusion |"
+            echo "| --- | ---: | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for check_name in "Quality gate" "CodeQL / JavaScript" "Dependency review"; do
+            check_run="$(jq -c \
+              --arg name "$check_name" \
+              '[
+                .check_runs[]
+                | select(.name == $name and .app.slug == "github-actions")
+              ]
+              | sort_by((.started_at // .created_at // ""), .id)
+              | last // {}' \
+              <<<"$check_runs")"
+            status="$(jq -r '.status // "missing"' <<<"$check_run")"
+            conclusion="$(jq -r '.conclusion // "missing"' <<<"$check_run")"
+            if [ "$status" != "completed" ] || [ "$conclusion" != "success" ]; then
+              echo "$check_name status: $status; conclusion: $conclusion"
+              exit 1
+            fi
+            echo "| $check_name | $(jq -r '.id' <<<"$check_run") | $conclusion |" \
+              >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          current_pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+          if [ "$(jq -r '.state' <<<"$current_pr_json")" != "open" ] \
+            || [ "$(jq -r '.draft' <<<"$current_pr_json")" != "true" ] \
+            || [ "$(jq -r '.base.ref' <<<"$current_pr_json")" != "main" ] \
+            || [ "$(jq -r '.base.sha' <<<"$current_pr_json")" != "$BASE_SHA" ] \
+            || [ "$(jq -r '.head.repo.full_name' <<<"$current_pr_json")" != "$GITHUB_REPOSITORY" ] \
+            || [ "$(jq -r '.head.sha' <<<"$current_pr_json")" != "$HEAD_SHA" ] \
+            || [ "$(jq -r '.merge_commit_sha' <<<"$current_pr_json")" != "$MERGE_SHA" ]; then
+            echo "Pull request changed while its checks were being inspected; retry staging"
+            exit 1
+          fi
+
+  smoke-session:
+    name: Protected staging session
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: staging
+    permissions:
+      checks: read
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Revalidate candidate after environment approval
+        env:
+          BASE_SHA: ${{ needs.preflight.outputs.base_sha }}
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ needs.preflight.outputs.head_sha }}
+          MERGE_SHA: ${{ needs.preflight.outputs.merge_sha }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          pr_json="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+          if [ "$(jq -r '.state' <<<"$pr_json")" != "open" ] \
+            || [ "$(jq -r '.draft' <<<"$pr_json")" != "true" ] \
+            || [ "$(jq -r '.base.ref' <<<"$pr_json")" != "main" ] \
+            || [ "$(jq -r '.base.sha' <<<"$pr_json")" != "$BASE_SHA" ] \
+            || [ "$(jq -r '.head.repo.full_name' <<<"$pr_json")" != "$GITHUB_REPOSITORY" ] \
+            || [ "$(jq -r '.head.sha' <<<"$pr_json")" != "$HEAD_SHA" ] \
+            || [ "$(jq -r '.merge_commit_sha' <<<"$pr_json")" != "$MERGE_SHA" ]; then
+            echo "Pull request changed while awaiting environment approval; retry staging"
+            exit 1
+          fi
+
+          check_runs="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/$GITHUB_REPOSITORY/commits/$MERGE_SHA/check-runs?per_page=100")"
+          for check_name in "Quality gate" "CodeQL / JavaScript" "Dependency review"; do
+            check_run="$(jq -c \
+              --arg name "$check_name" \
+              '[
+                .check_runs[]
+                | select(.name == $name and .app.slug == "github-actions")
+              ]
+              | sort_by((.started_at // .created_at // ""), .id)
+              | last // {}' \
+              <<<"$check_runs")"
+            status="$(jq -r '.status // "missing"' <<<"$check_run")"
+            conclusion="$(jq -r '.conclusion // "missing"' <<<"$check_run")"
+            if [ "$status" != "completed" ] || [ "$conclusion" != "success" ]; then
+              echo "$check_name status: $status; conclusion: $conclusion"
+              exit 1
+            fi
+          done
+      - name: Check out reviewed PR commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.preflight.outputs.head_sha }}
+          persist-credentials: false
+      - name: Validate checked-out commit
+        env:
+          COMMIT_SHA: ${{ needs.preflight.outputs.head_sha }}
+        run: |
+          if [ "$(git rev-parse HEAD)" != "$COMMIT_SHA" ]; then
+            echo "Checked-out commit does not match the reviewed PR head"
+            exit 1
+          fi
+      - name: Use Node.js 22.21.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.21.0
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify exact staging commit
+        run: npm run verify
+      - name: Register staging guild commands
+        env:
+          DISCORD_TOKEN: ${{ secrets.STAGING_DISCORD_TOKEN }}
+          DISCORD_CLIENT_ID: ${{ secrets.STAGING_DISCORD_CLIENT_ID }}
+          DISCORD_GUILD_ID: ${{ secrets.STAGING_DISCORD_GUILD_ID }}
+        run: npm run deploy
+      - name: Run ten-minute staging window
+        env:
+          DISCORD_TOKEN: ${{ secrets.STAGING_DISCORD_TOKEN }}
+          DISCORD_CLIENT_ID: ${{ secrets.STAGING_DISCORD_CLIENT_ID }}
+          DISCORD_GUILD_ID: ${{ secrets.STAGING_DISCORD_GUILD_ID }}
+        run: |
+          exit_code=0
+          timeout --signal=TERM --kill-after=15s 10m node src/index.js || exit_code=$?
+          if [ "$exit_code" -ne 0 ] && [ "$exit_code" -ne 124 ]; then
+            exit "$exit_code"
+          fi

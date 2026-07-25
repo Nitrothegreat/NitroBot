@@ -56,6 +56,7 @@ Guild commands normally update immediately. This project intentionally does not 
 
 | Command | Description |
 | --- | --- |
+| `/avatar [target]` | Publicly displays your avatar, or another user's avatar when selected. |
 | `/help` | Privately lists the bot's available commands. |
 | `/ping` | Replies with `Pong!`. |
 | `/secretping` | Replies privately with `Pong!`. |

@@ -43,12 +43,50 @@ describe('command deployment', () => {
 		assert.match(logger.info.mock.calls[1].arguments[0], /Successfully deployed 1 guild command/);
 	});
 
+	it('rejects an empty command set before crossing deployment boundaries', async () => {
+		const secretToken = 'EMPTY_DEPLOY_SECRET_SENTINEL';
+		const put = mock.fn(async () => []);
+		const restFactory = mock.fn((_token) => ({ put }));
+		const logger = { info: mock.fn() };
+		let serializationAttempted = false;
+		/** @type {{ data: { toJSON: () => unknown } }[]} */
+		const commands = new Proxy([], {
+			get(target, property, receiver) {
+				if (property === 'map') {
+					serializationAttempted = true;
+				}
+				return Reflect.get(target, property, receiver);
+			},
+		});
+
+		await assert.rejects(
+			deployCommands(
+				{ clientId: '1', guildId: '2', token: secretToken },
+				commands,
+				logger,
+				restFactory,
+			),
+			(error) => {
+				assert.ok(error instanceof Error);
+				assert.equal(error.message, 'Refusing to deploy an empty command set');
+				assert.doesNotMatch(error.message, new RegExp(secretToken));
+				return true;
+			},
+		);
+
+		assert.equal(serializationAttempted, false);
+		assert.equal(logger.info.mock.callCount(), 0);
+		assert.equal(restFactory.mock.callCount(), 0);
+		assert.equal(put.mock.callCount(), 0);
+	});
+
 	it('supports an empty deployment response', async () => {
 		const logger = { info: mock.fn() };
+		const commands = [{ data: { toJSON: () => ({ name: 'ping' }) } }];
 
 		const result = await deployCommands(
 			{ clientId: '1', guildId: '2', token: 'token' },
-			[],
+			commands,
 			logger,
 			() => ({ put: async () => [] }),
 		);
@@ -58,11 +96,12 @@ describe('command deployment', () => {
 	});
 
 	it('rejects invalid or failed REST responses without logging success', async () => {
+		const commands = [{ data: { toJSON: () => ({ name: 'ping' }) } }];
 		const invalidLogger = { info: mock.fn() };
 		await assert.rejects(
 			deployCommands(
 				{ clientId: '1', guildId: '2', token: 'token' },
-				[],
+				commands,
 				invalidLogger,
 				() => ({ put: async () => ({ unexpected: true }) }),
 			),
@@ -75,7 +114,7 @@ describe('command deployment', () => {
 		await assert.rejects(
 			deployCommands(
 				{ clientId: '1', guildId: '2', token: 'token' },
-				[],
+				commands,
 				failedLogger,
 				() => ({ put: async () => { throw restError; } }),
 			),

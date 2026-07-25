@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
-import { MessageFlags } from 'discord.js';
+import { ApplicationCommandOptionType, MessageFlags } from 'discord.js';
+import * as avatar from '../src/commands/avatar.js';
 import * as help from '../src/commands/help.js';
 import * as ping from '../src/commands/ping.js';
 import * as secretping from '../src/commands/secretping.js';
@@ -8,13 +9,14 @@ import * as server from '../src/commands/server.js';
 import * as sourcecode from '../src/commands/sourcecode.js';
 import * as user from '../src/commands/user.js';
 
-const commands = [help, ping, secretping, server, sourcecode, user];
+const commands = [avatar, help, ping, secretping, server, sourcecode, user];
 
 describe('commands', () => {
 	it('exports unique, serializable definitions and handlers', () => {
 		const names = commands.map((command) => command.data.name);
 
 		assert.deepEqual(names, [
+			'avatar',
 			'help',
 			'ping',
 			'secretping',
@@ -27,6 +29,95 @@ describe('commands', () => {
 			assert.equal(typeof command.data.toJSON, 'function');
 			assert.equal(typeof command.execute, 'function');
 		}
+	});
+
+	it('defines avatar with an optional target user', () => {
+		const definition = avatar.data.toJSON();
+		assert.equal(definition.name, 'avatar');
+		assert.equal(definition.description, 'Displays a user\'s avatar.');
+		assert.deepEqual(definition.options, [{
+			description: 'The user whose avatar to display.',
+			description_localizations: undefined,
+			name: 'target',
+			name_localizations: undefined,
+			required: false,
+			type: ApplicationCommandOptionType.User,
+		}]);
+	});
+
+	it('displays the caller avatar publicly by default', async () => {
+		const displayAvatarURL = mock.fn((options) => {
+			void options;
+			return 'https://cdn.discordapp.com/avatars/caller/avatar.png?size=1024';
+		});
+		const reply = mock.fn();
+
+		await avatar.execute({
+			options: { getUser: mock.fn(() => null) },
+			reply,
+			user: { displayAvatarURL, username: 'Caller' },
+		});
+
+		assert.deepEqual(displayAvatarURL.mock.calls[0].arguments[0], {
+			extension: 'png',
+			forceStatic: true,
+			size: 1024,
+		});
+		assert.deepEqual(reply.mock.calls[0].arguments[0].embeds[0].toJSON(), {
+			image: { url: 'https://cdn.discordapp.com/avatars/caller/avatar.png?size=1024' },
+			title: 'Caller\'s Avatar',
+		});
+		assert.equal('content' in reply.mock.calls[0].arguments[0], false);
+		assert.equal('flags' in reply.mock.calls[0].arguments[0], false);
+	});
+
+	it('displays a selected target avatar instead of the caller avatar', async () => {
+		const callerAvatarURL = mock.fn(() => 'https://cdn.discordapp.com/avatars/caller/avatar.png');
+		const targetAvatarURL = mock.fn((options) => {
+			void options;
+			return 'https://cdn.discordapp.com/avatars/target/avatar.png?size=1024';
+		});
+		const target = { displayAvatarURL: targetAvatarURL, username: 'Target' };
+		const getUser = mock.fn((name) => {
+			void name;
+			return target;
+		});
+		const reply = mock.fn();
+
+		await avatar.execute({
+			options: { getUser },
+			reply,
+			user: { displayAvatarURL: callerAvatarURL, username: 'Caller' },
+		});
+
+		assert.equal(getUser.mock.calls[0].arguments[0], 'target');
+		assert.equal(callerAvatarURL.mock.callCount(), 0);
+		assert.deepEqual(targetAvatarURL.mock.calls[0].arguments[0], {
+			extension: 'png',
+			forceStatic: true,
+			size: 1024,
+		});
+		assert.deepEqual(reply.mock.calls[0].arguments[0].embeds[0].toJSON(), {
+			image: { url: 'https://cdn.discordapp.com/avatars/target/avatar.png?size=1024' },
+			title: 'Target\'s Avatar',
+		});
+	});
+
+	it('uses the default Discord avatar returned for a user without a custom avatar', async () => {
+		const defaultAvatar = 'https://cdn.discordapp.com/embed/avatars/3.png';
+		const displayAvatarURL = mock.fn(() => defaultAvatar);
+		const reply = mock.fn();
+
+		await avatar.execute({
+			options: { getUser: mock.fn(() => null) },
+			reply,
+			user: { displayAvatarURL, username: 'Default User' },
+		});
+
+		assert.equal(
+			reply.mock.calls[0].arguments[0].embeds[0].toJSON().image.url,
+			defaultAvatar,
+		);
 	});
 
 	it('defines help without options', () => {

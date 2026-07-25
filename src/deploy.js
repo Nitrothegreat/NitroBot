@@ -28,6 +28,10 @@ export async function deployCommands(
 	logger = console,
 	restFactory = (restToken) => new REST({ version: '10' }).setToken(restToken),
 ) {
+	if (commands.length === 0) {
+		throw new Error('Refusing to deploy an empty command set');
+	}
+
 	const payload = buildCommandPayload(commands);
 	const rest = restFactory(token);
 

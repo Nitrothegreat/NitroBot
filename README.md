@@ -44,6 +44,10 @@ Register the slash commands in the configured server whenever their definitions 
 npm run deploy
 ```
 
+Deployment fails closed if no local commands are discovered; it will not clear
+the guild's registered command set. Clearing all commands requires a separately
+designed and explicitly authorized operation.
+
 Then start the bot:
 
 ```bash

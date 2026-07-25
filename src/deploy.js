@@ -1,4 +1,5 @@
 import { REST, Routes } from 'discord.js';
+import { OperationalError } from './errors.js';
 
 /**
  * @typedef {object} Command
@@ -29,7 +30,7 @@ export async function deployCommands(
 	restFactory = (restToken) => new REST({ version: '10' }).setToken(restToken),
 ) {
 	if (commands.length === 0) {
-		throw new Error('Refusing to deploy an empty command set');
+		throw new OperationalError('DEPLOY_COMMAND_SET_EMPTY');
 	}
 
 	const payload = buildCommandPayload(commands);
@@ -42,7 +43,7 @@ export async function deployCommands(
 	);
 
 	if (!Array.isArray(data)) {
-		throw new Error('Discord returned an invalid command deployment response');
+		throw new OperationalError('DEPLOY_RESPONSE_INVALID');
 	}
 
 	logger.info(`Successfully deployed ${data.length} guild command(s).`);

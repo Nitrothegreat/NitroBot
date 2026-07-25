@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, it } from 'node:test';
+import { safeErrorDetails } from '../src/errors.js';
 import { loadCommands, loadEvents } from '../src/loaders.js';
 
 /** @type {string[]} */
@@ -39,13 +40,27 @@ describe('loadCommands', () => {
 
 	it('rejects malformed and duplicate command modules', async () => {
 		const malformed = await fixtureDirectory({ 'bad.js': 'export const data = {};' });
-		await assert.rejects(loadCommands(malformed), /Invalid command module: bad.js/);
+		await assert.rejects(loadCommands(malformed), (error) => {
+			assert.deepEqual(safeErrorDetails(error), {
+				context: { file: 'bad.js' },
+				reason: 'COMMAND_MODULE_INVALID',
+				type: 'OperationalError',
+			});
+			return true;
+		});
 
 		const duplicate = await fixtureDirectory({
 			'a.js': "export const data = { name: 'same', toJSON() {} }; export function execute() {}",
 			'b.js': "export const data = { name: 'same', toJSON() {} }; export function execute() {}",
 		});
-		await assert.rejects(loadCommands(duplicate), /Duplicate command name: same/);
+		await assert.rejects(loadCommands(duplicate), (error) => {
+			assert.deepEqual(safeErrorDetails(error), {
+				context: { file: 'b.js' },
+				reason: 'COMMAND_NAME_DUPLICATE',
+				type: 'OperationalError',
+			});
+			return true;
+		});
 	});
 });
 
@@ -62,13 +77,27 @@ describe('loadEvents', () => {
 
 	it('rejects malformed and duplicate event modules', async () => {
 		const malformed = await fixtureDirectory({ 'bad.js': "export const name = 'bad';" });
-		await assert.rejects(loadEvents(malformed), /Invalid event module: bad.js/);
+		await assert.rejects(loadEvents(malformed), (error) => {
+			assert.deepEqual(safeErrorDetails(error), {
+				context: { file: 'bad.js' },
+				reason: 'EVENT_MODULE_INVALID',
+				type: 'OperationalError',
+			});
+			return true;
+		});
 
 		const duplicate = await fixtureDirectory({
 			'a.js': "export const name = 'ready'; export function execute() {}",
 			'b.js': "export const name = 'ready'; export function execute() {}",
 		});
-		await assert.rejects(loadEvents(duplicate), /Duplicate event name: ready/);
+		await assert.rejects(loadEvents(duplicate), (error) => {
+			assert.deepEqual(safeErrorDetails(error), {
+				context: { file: 'b.js' },
+				reason: 'EVENT_NAME_DUPLICATE',
+				type: 'OperationalError',
+			});
+			return true;
+		});
 	});
 
 	it('rejects a non-boolean once flag', async () => {
@@ -76,6 +105,13 @@ describe('loadEvents', () => {
 			'bad.js': "export const name = 'ready'; export const once = 'yes'; export function execute() {}",
 		});
 
-		await assert.rejects(loadEvents(directory), /Invalid event module: bad.js/);
+		await assert.rejects(loadEvents(directory), (error) => {
+			assert.deepEqual(safeErrorDetails(error), {
+				context: { file: 'bad.js' },
+				reason: 'EVENT_MODULE_INVALID',
+				type: 'OperationalError',
+			});
+			return true;
+		});
 	});
 });

@@ -1,3 +1,5 @@
+import { OperationalError } from './errors.js';
+
 const SNOWFLAKE_PATTERN = /^\d{17,20}$/;
 
 /**
@@ -23,7 +25,7 @@ function requireValue(environment, name) {
 	const value = environment[name]?.trim();
 
 	if (!value) {
-		throw new Error(`Missing required environment variable: ${name}`);
+		throw new OperationalError('CONFIG_VARIABLE_MISSING', { variable: name });
 	}
 
 	return value;
@@ -37,7 +39,7 @@ function requireSnowflake(environment, name) {
 	const value = requireValue(environment, name);
 
 	if (!SNOWFLAKE_PATTERN.test(value)) {
-		throw new Error(`${name} must be a valid Discord ID`);
+		throw new OperationalError('CONFIG_DISCORD_ID_INVALID', { variable: name });
 	}
 
 	return value;

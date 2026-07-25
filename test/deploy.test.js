@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it, mock } from 'node:test';
 import { Routes } from 'discord.js';
 import { buildCommandPayload, deployCommands } from '../src/deploy.js';
+import { safeErrorDetails } from '../src/errors.js';
 
 describe('command deployment', () => {
 	it('serializes every command exactly once', () => {
@@ -67,9 +68,11 @@ describe('command deployment', () => {
 				restFactory,
 			),
 			(error) => {
-				assert.ok(error instanceof Error);
-				assert.equal(error.message, 'Refusing to deploy an empty command set');
-				assert.doesNotMatch(error.message, new RegExp(secretToken));
+				assert.deepEqual(safeErrorDetails(error), {
+					reason: 'DEPLOY_COMMAND_SET_EMPTY',
+					type: 'OperationalError',
+				});
+				assert.doesNotMatch(JSON.stringify(safeErrorDetails(error)), new RegExp(secretToken));
 				return true;
 			},
 		);
@@ -105,7 +108,13 @@ describe('command deployment', () => {
 				invalidLogger,
 				() => ({ put: async () => ({ unexpected: true }) }),
 			),
-			/invalid command deployment response/,
+			(error) => {
+				assert.deepEqual(safeErrorDetails(error), {
+					reason: 'DEPLOY_RESPONSE_INVALID',
+					type: 'OperationalError',
+				});
+				return true;
+			},
 		);
 		assert.equal(invalidLogger.info.mock.callCount(), 1);
 

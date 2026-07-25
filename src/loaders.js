@@ -1,5 +1,6 @@
 import { readdir } from 'node:fs/promises';
 import { Collection } from 'discord.js';
+import { OperationalError } from './errors.js';
 
 /**
  * @typedef {object} Command
@@ -29,11 +30,11 @@ export async function loadCommands(directory) {
 		const name = data?.name;
 
 		if (typeof name !== 'string' || typeof data?.toJSON !== 'function' || typeof execute !== 'function') {
-			throw new Error(`Invalid command module: ${file}`);
+			throw new OperationalError('COMMAND_MODULE_INVALID', { file });
 		}
 
 		if (commands.has(name)) {
-			throw new Error(`Duplicate command name: ${name}`);
+			throw new OperationalError('COMMAND_NAME_DUPLICATE', { file });
 		}
 
 		commands.set(name, { data, execute });
@@ -57,11 +58,11 @@ export async function loadEvents(directory) {
 		const { name, once = false, execute } = module;
 
 		if (typeof name !== 'string' || typeof once !== 'boolean' || typeof execute !== 'function') {
-			throw new Error(`Invalid event module: ${file}`);
+			throw new OperationalError('EVENT_MODULE_INVALID', { file });
 		}
 
 		if (eventNames.has(name)) {
-			throw new Error(`Duplicate event name: ${name}`);
+			throw new OperationalError('EVENT_NAME_DUPLICATE', { file });
 		}
 
 		eventNames.add(name);

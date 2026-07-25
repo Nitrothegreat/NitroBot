@@ -59,6 +59,7 @@ Guild commands normally update immediately. This project intentionally does not 
 | `/avatar [target]` | Publicly displays your avatar, or another user's avatar when selected. |
 | `/help` | Privately lists the bot's available commands. |
 | `/ping` | Replies with `Pong!`. |
+| `/roll [sides: 2–1000]` | Publicly rolls a die with 6 sides by default. |
 | `/secretping` | Replies privately with `Pong!`. |
 | `/server` | Shows the current server's name and member count. |
 | `/user` | Shows the caller's username and server join date. |

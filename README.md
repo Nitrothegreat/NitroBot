@@ -56,6 +56,7 @@ Guild commands normally update immediately. This project intentionally does not 
 
 | Command | Description |
 | --- | --- |
+| `/help` | Privately lists the bot's available commands. |
 | `/ping` | Replies with `Pong!`. |
 | `/secretping` | Replies privately with `Pong!`. |
 | `/server` | Shows the current server's name and member count. |

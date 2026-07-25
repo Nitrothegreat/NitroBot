@@ -4,12 +4,13 @@ import { ApplicationCommandOptionType, MessageFlags } from 'discord.js';
 import * as avatar from '../src/commands/avatar.js';
 import * as help from '../src/commands/help.js';
 import * as ping from '../src/commands/ping.js';
+import * as roll from '../src/commands/roll.js';
 import * as secretping from '../src/commands/secretping.js';
 import * as server from '../src/commands/server.js';
 import * as sourcecode from '../src/commands/sourcecode.js';
 import * as user from '../src/commands/user.js';
 
-const commands = [avatar, help, ping, secretping, server, sourcecode, user];
+const commands = [avatar, help, ping, roll, secretping, server, sourcecode, user];
 
 describe('commands', () => {
 	it('exports unique, serializable definitions and handlers', () => {
@@ -19,6 +20,7 @@ describe('commands', () => {
 			'avatar',
 			'help',
 			'ping',
+			'roll',
 			'secretping',
 			'server',
 			'sourcecode',
@@ -125,6 +127,118 @@ describe('commands', () => {
 		assert.equal(definition.name, 'help');
 		assert.equal(definition.description, 'Lists the bot\'s available commands.');
 		assert.deepEqual(definition.options, []);
+	});
+
+	it('defines roll with optional sides constrained from 2 through 1000', () => {
+		const definition = roll.data.toJSON();
+		assert.equal(definition.name, 'roll');
+		assert.equal(definition.description, 'Rolls a die.');
+		assert.deepEqual(definition.options, [{
+			autocomplete: undefined,
+			choices: undefined,
+			description: 'The number of sides on the die.',
+			description_localizations: undefined,
+			max_value: 1000,
+			min_value: 2,
+			name: 'sides',
+			name_localizations: undefined,
+			required: false,
+			type: ApplicationCommandOptionType.Integer,
+		}]);
+	});
+
+	it('rolls a six-sided die by default', async () => {
+		const getInteger = mock.fn((name) => {
+			void name;
+			return null;
+		});
+		const reply = mock.fn();
+		const originalRandom = Math.random;
+		Math.random = () => 0.5;
+
+		try {
+			await roll.execute({ options: { getInteger }, reply });
+		} finally {
+			Math.random = originalRandom;
+		}
+
+		assert.equal(getInteger.mock.calls[0].arguments[0], 'sides');
+		assert.equal(reply.mock.calls[0].arguments[0], 'You rolled 4 (d6).');
+	});
+
+	it('rolls a die with a custom side count', async () => {
+		const getInteger = mock.fn((name) => {
+			void name;
+			return 20;
+		});
+		const reply = mock.fn();
+		const originalRandom = Math.random;
+		Math.random = () => 0;
+
+		try {
+			await roll.execute({ options: { getInteger }, reply });
+		} finally {
+			Math.random = originalRandom;
+		}
+
+		assert.equal(reply.mock.calls[0].arguments[0], 'You rolled 1 (d20).');
+		assert.equal('flags' in Object(reply.mock.calls[0].arguments[0]), false);
+	});
+
+	it('rolls deterministic values across supported boundaries', () => {
+		assert.equal(roll.rollDie(2, () => 0), 1);
+		const random = mock.fn(() => 0.5);
+		assert.equal(roll.rollDie(6, random), 4);
+		assert.equal(random.mock.callCount(), 1);
+		assert.equal(roll.rollDie(1000, () => 1 - Number.EPSILON), 1000);
+	});
+
+	it('rejects invalid direct side counts before using randomness', () => {
+		const invalidSides = [1, 1001, 2.5, Number.NaN, Number.POSITIVE_INFINITY, '6', new Number(6)];
+
+		for (const sides of invalidSides) {
+			const random = mock.fn(() => 0);
+			assert.throws(
+				() => roll.rollDie(/** @type {number} */ (sides), random),
+				{
+					message: 'Sides must be an integer between 2 and 1000.',
+					name: 'RangeError',
+				},
+			);
+			assert.equal(random.mock.callCount(), 0);
+		}
+	});
+
+	it('rejects invalid random sources and samples', () => {
+		assert.throws(
+			() => roll.rollDie(6, /** @type {() => number} */ (/** @type {unknown} */ (null))),
+			{
+				message: 'Random source must be a function.',
+				name: 'TypeError',
+			},
+		);
+
+		for (const sample of [-1, 1, Number.NaN, Number.POSITIVE_INFINITY, '0.5', {}]) {
+			const random = mock.fn(() => /** @type {number} */ (sample));
+			assert.throws(
+				() => roll.rollDie(6, random),
+				{
+					message: 'Random source must return a number from 0 up to, but not including, 1.',
+					name: 'RangeError',
+				},
+			);
+			assert.equal(random.mock.callCount(), 1);
+		}
+	});
+
+	it('propagates errors from the random source after one call', () => {
+		const failure = new Error('random failed');
+		const random = mock.fn(() => {
+			throw failure;
+		});
+
+		assert.throws(() => roll.rollDie(6, random), (error) => error === failure);
+		assert.equal(random.mock.callCount(), 1);
 	});
 
 	it('lists registered commands alphabetically in a private embed', async () => {

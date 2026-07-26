@@ -7,10 +7,12 @@ loads command and event modules, creates the Discord client, installs shutdown
 handlers, and logs in. Keep it thin; business behavior belongs in importable,
 offline-testable modules.
 
-Commands export a serializable `data` definition and an asynchronous `execute`
-handler. Command names are unique. Events export `name`, `execute`, and an
-optional boolean `once`. Loaders validate these contracts before the client
-connects.
+Commands export a synchronously serializable `data` definition and an `execute`
+handler. The definition's non-empty name and description must match its
+serialized chat-input command payload, and command names are unique.
+Serialization must be deterministic and side-effect-free. Events export a
+non-empty `name`, `execute`, and an optional boolean `once`. Loaders validate
+these contracts before the client connects.
 
 `handleInteraction` owns command routing and safe failure acknowledgement.
 Preserve Discord's single-initial-response contract:

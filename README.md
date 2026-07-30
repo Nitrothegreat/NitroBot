@@ -20,6 +20,16 @@ Treat the bot token like a password. Never paste it into source code, logs, issu
 
 ## Installation and configuration
 
+Use the recommended local Node.js version when developing with nvm:
+
+```bash
+nvm install
+nvm use
+```
+
+The `.nvmrc` version is the recommended development default. NitroBot supports
+Node.js 22.21 or newer, and CI verifies both the minimum version and Node.js 24.
+
 Install the locked dependencies:
 
 ```bash
